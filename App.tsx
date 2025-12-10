@@ -24,6 +24,7 @@ function App() {
     status: ''
   });
   const [generatingPDF, setGeneratingPDF] = useState(false);
+  const [activeTab, setActiveTab] = useState<'active' | 'history'>('active');
   
   // Modals state
   const [isAIModalOpen, setIsAIModalOpen] = useState(false);
@@ -95,14 +96,22 @@ function App() {
       }
   };
 
-  // Filter Logic
+  // 1. Separate Active vs Archived (History) records based on 'isArchived' flag
+  // 'isArchived' is set by the sheetsService based on which sheet the data came from (BD_GARANTIA vs EQUIPOS_PROCESADOS)
+  const activeRecords = useMemo(() => records.filter(r => !r.isArchived), [records]);
+  const historyRecords = useMemo(() => records.filter(r => r.isArchived), [records]);
+
+  // 2. Select which dataset to filter based on Active Tab
+  const currentDataset = activeTab === 'active' ? activeRecords : historyRecords;
+
+  // 3. Apply Filters to the current dataset
   const filteredRecords = useMemo(() => {
-    return records.filter(record => {
+    return currentDataset.filter(record => {
       const matchDateStart = filters.startDate ? record.fecha >= filters.startDate : true;
       const matchDateEnd = filters.endDate ? record.fecha <= filters.endDate : true;
       const matchTienda = filters.tienda ? record.tienda === filters.tienda : true;
       
-      // Logic for Status Filter (Mutually exclusive for clarity)
+      // Logic for Status Filter
       const matchStatus = filters.status ? (() => {
           if (filters.status === 'entregado') return !!record.imeiEntregado;
           // Processed but NOT yet delivered
@@ -121,9 +130,9 @@ function App() {
 
       return matchDateStart && matchDateEnd && matchTienda && matchStatus && matchImei;
     });
-  }, [records, filters]);
+  }, [currentDataset, filters]);
 
-  // Derived Data
+  // Derived Data (Stats) - Calculated from filtered records of the current view
   const tiendas = useMemo(() => {
     const storeSet = new Set(records.map(r => r.tienda).filter(Boolean));
     if (storeSet.size === 0) return ['K24 Central', 'K24 Norte', 'K24 Sur', 'K24 Este'];
@@ -133,14 +142,13 @@ function App() {
   const stats: Stats = useMemo(() => {
     const totalRecords = filteredRecords.length;
     const totalValue = filteredRecords.reduce((sum, r) => sum + r.precio, 0);
-    const brands: Record<string, number> = {};
-    filteredRecords.forEach(r => { if(r.marcaEquipo) brands[r.marcaEquipo] = (brands[r.marcaEquipo] || 0) + 1; });
-    const topBrand = Object.entries(brands).sort((a,b) => b[1] - a[1])[0]?.[0] || '';
+    
+    // Top Store Calculation
     const stores: Record<string, number> = {};
     filteredRecords.forEach(r => { if(r.tienda) stores[r.tienda] = (stores[r.tienda] || 0) + 1; });
     const topStore = Object.entries(stores).sort((a,b) => b[1] - a[1])[0]?.[0] || '';
 
-    return { totalRecords, totalValue, topBrand, topStore };
+    return { totalRecords, totalValue, topStore };
   }, [filteredRecords]);
 
   const handleGeneratePDF = async () => {
@@ -160,8 +168,9 @@ function App() {
           console.warn("Could not fetch logo for PDF");
       }
       
-      const isFiltered = filteredRecords.length !== records.length || Object.values(filters).some(Boolean);
-      const reportTitle = isFiltered ? "Reporte de Garantías (Filtrado)" : "Reporte General de Garantías - Tiendas K24";
+      const isFiltered = filteredRecords.length !== currentDataset.length || Object.values(filters).some(Boolean);
+      const viewName = activeTab === 'active' ? 'Garantías Activas' : 'Historial Procesados';
+      const reportTitle = isFiltered ? `Reporte ${viewName} (Filtrado)` : `Reporte General ${viewName} - K24`;
 
       doc.setFontSize(18);
       doc.setTextColor(40);
@@ -194,7 +203,7 @@ function App() {
       // AI Summary
       try {
           const summary = await generateAIReport(filteredRecords, 
-            `Reporte filtrado para tienda: ${filters.tienda || 'Todas'}. Estado: ${filters.status || 'Todos'}. Fecha: ${dateStr}`);
+            `Reporte filtrado para tienda: ${filters.tienda || 'Todas'}. Estado: ${filters.status || 'Todos'}. Vista: ${viewName}. Fecha: ${dateStr}`);
           
           doc.setFontSize(11);
           doc.setTextColor(0);
@@ -234,7 +243,7 @@ function App() {
       doc.text(`Registros en este reporte: ${filteredRecords.length}`, 14, finalY);
       doc.text(`Valor Inventario (Filtrado): $${stats.totalValue.toLocaleString()}`, 14, finalY + 6);
 
-      const fileName = isFiltered ? `reporte_garantias_filtrado_${Date.now()}.pdf` : `reporte_garantias_general_${Date.now()}.pdf`;
+      const fileName = isFiltered ? `reporte_k24_${activeTab}_filtrado_${Date.now()}.pdf` : `reporte_k24_${activeTab}_general_${Date.now()}.pdf`;
       doc.save(fileName);
     } catch (error) {
       console.error("PDF Gen Error", error);
@@ -304,8 +313,40 @@ function App() {
           </div>
         </div>
 
+        {/* View Tabs */}
+        <div className="flex space-x-1 rounded-xl bg-gray-200 p-1 mb-6 max-w-md">
+            <button
+              onClick={() => setActiveTab('active')}
+              className={`w-full rounded-lg py-2.5 text-sm font-medium leading-5 transition-all
+                ${activeTab === 'active' 
+                  ? 'bg-white text-blue-700 shadow'
+                  : 'text-gray-600 hover:bg-white/[0.12] hover:text-gray-800'
+                }`}
+            >
+              <i className="fas fa-clipboard-list mr-2"></i> Garantías Activas
+            </button>
+            <button
+              onClick={() => setActiveTab('history')}
+              className={`w-full rounded-lg py-2.5 text-sm font-medium leading-5 transition-all
+                ${activeTab === 'history' 
+                  ? 'bg-white text-blue-700 shadow'
+                  : 'text-gray-600 hover:bg-white/[0.12] hover:text-gray-800'
+                }`}
+            >
+              <i className="fas fa-archive mr-2"></i> Historial Procesados
+            </button>
+        </div>
+
         <StatsCards stats={stats} />
         <FilterBar filters={filters} setFilters={setFilters} tiendas={tiendas} />
+        
+        {/* Dynamic Title for Table */}
+        <div className="mb-4 flex items-center justify-between">
+            <h2 className="text-lg font-semibold text-gray-700">
+                {activeTab === 'active' ? 'Listado de Garantías en Curso' : 'Archivo de Equipos Procesados'}
+            </h2>
+        </div>
+
         <DataTable records={filteredRecords} isLoading={loading} onEdit={handleEditClick} onDelete={handleDeleteRecord} />
 
       </main>

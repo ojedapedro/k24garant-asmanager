@@ -28,6 +28,5 @@ export interface FilterState {
 export interface Stats {
   totalRecords: number;
   totalValue: number;
-  topBrand: string;
   topStore: string;
 }
