@@ -4,9 +4,13 @@ import Papa from 'papaparse';
 const SHEET_ID = '1tUIWLYEbjJjnsjIvnVLN_FtS4FzliKlNjCiCeUXnSpY';
 const CSV_URL = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/export?format=csv&gid=0`;
 
-// PASTE YOUR APPS SCRIPT WEB APP URL HERE
-// Example: "https://script.google.com/macros/s/AKfycbx.../exec"
-export const https://script.google.com/macros/s/AKfycbxZgN04PtCnm2z3XgQXt3Q9rOw9Pu0uFZ4kE0oRS2nvYXbZZkF93A4bfSxZuhyfS38nTg/exec =""; 
+// ==========================================
+// INSTRUCCIONES PARA GUARDAR EN GOOGLE SHEETS:
+// 1. Despliega el Apps Script como se indicó anteriormente.
+// 2. Copia la URL de la aplicación web (ej: https://script.google.com/macros/s/.../exec).
+// 3. Pégala DENTRO de las comillas en la variable de abajo.
+// ==========================================
+export const GOOGLE_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbxZgN04PtCnm2z3XgQXt3Q9rOw9Pu0uFZ4kE0oRS2nvYXbZZkF93A4bfSxZuhyfS38nTg/exec"; 
 
 // Mock data
 const MOCK_DATA: WarrantyRecord[] = [
