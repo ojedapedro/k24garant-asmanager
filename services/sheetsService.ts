@@ -2,7 +2,8 @@ import { WarrantyRecord } from '../types';
 import Papa from 'papaparse';
 
 const SHEET_ID = '1tUIWLYEbjJjnsjIvnVLN_FtS4FzliKlNjCiCeUXnSpY';
-const CSV_URL = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/export?format=csv&gid=0`;
+// Usamos gviz/tq para poder seleccionar la hoja por nombre ("BD") en lugar de GID
+const CSV_URL = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:csv&sheet=BD`;
 
 // ==========================================
 // INSTRUCCIONES PARA GUARDAR EN GOOGLE SHEETS:
@@ -12,12 +13,12 @@ const CSV_URL = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/export?forma
 // ==========================================
 export const GOOGLE_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbxZgN04PtCnm2z3XgQXt3Q9rOw9Pu0uFZ4kE0oRS2nvYXbZZkF93A4bfSxZuhyfS38nTg/exec"; 
 
-// Mock data
+// Mock data para fallback
 const MOCK_DATA: WarrantyRecord[] = [
   {
     id: '1',
     fecha: '2023-10-01',
-    nombreEquipo: 'iPhone 13',
+    nombreEquipo: 'iPhone 13 (Ejemplo)',
     marcaEquipo: 'Apple',
     imeiMalo: '354829102938475',
     tienda: 'K24 Central',
@@ -30,59 +31,44 @@ const MOCK_DATA: WarrantyRecord[] = [
     fechaRealizaCambio: '2023-10-05',
     equipoProcesado: true,
     observaciones: 'Cliente reportó daño en caja original.'
-  },
-  {
-    id: '2',
-    fecha: '2023-10-02',
-    nombreEquipo: 'Galaxy S23',
-    marcaEquipo: 'Samsung',
-    imeiMalo: '990000112233445',
-    tienda: 'K24 Norte',
-    fechaCambio: '2023-10-03',
-    proveedor: 'Samsung Direct',
-    imeiEntregado: '990000112233446',
-    falla: 'No carga',
-    cantidad: 1,
-    precio: 900,
-    fechaRealizaCambio: '2023-10-03',
-    equipoProcesado: true,
-    observaciones: ''
-  },
-  {
-    id: '3',
-    fecha: '2023-10-15',
-    nombreEquipo: 'Redmi Note 12',
-    marcaEquipo: 'Xiaomi',
-    imeiMalo: '864209123456789',
-    tienda: 'K24 Sur',
-    fechaCambio: '2023-10-20',
-    proveedor: 'Comcel',
-    imeiEntregado: '864209123456790',
-    falla: 'Reinicio constante',
-    cantidad: 1,
-    precio: 250,
-    fechaRealizaCambio: '2023-10-20',
-    equipoProcesado: false,
-    observaciones: 'Esperando respuesta de soporte técnico.'
   }
 ];
 
+// Helper para limpiar las claves del objeto (quita espacios extra y normaliza)
+const normalizeKey = (key: string) => key.trim().toUpperCase();
+
 export const fetchWarrantyData = async (): Promise<WarrantyRecord[]> => {
   try {
+    console.log("Intentando conectar a hoja BD:", CSV_URL);
     const response = await fetch(CSV_URL);
+    
     if (!response.ok) {
-      throw new Error('Network response was not ok');
+      throw new Error(`Error de red: ${response.status}`);
     }
+    
     const csvText = await response.text();
     
     return new Promise((resolve) => {
       Papa.parse(csvText, {
         header: true,
         skipEmptyLines: true,
+        transformHeader: (header) => normalizeKey(header), // Normaliza cabeceras automáticamente
         complete: (results) => {
-          const records: WarrantyRecord[] = results.data.map((row: any, index: number) => {
-            const rawProcesado = (row['EQUIPO PROCESADO'] || '').toUpperCase();
-            const isProcesado = rawProcesado === 'SI' || rawProcesado === 'TRUE' || rawProcesado === 'YES' || rawProcesado.includes('PROCESADO');
+          console.log("Filas crudas encontradas:", results.data.length);
+          
+          if (results.data.length === 0) {
+            console.warn("La hoja parece vacía.");
+            resolve([]);
+            return;
+          }
+
+          const records: WarrantyRecord[] = results.data
+            .filter((row: any) => row['FECHA'] || row['NOMBRE DEL EQUIPO']) // Filtrar filas vacías
+            .map((row: any, index: number) => {
+            
+            // Lógica robusta para detectar bools
+            const rawProcesado = (row['EQUIPO PROCESADO'] || '').toString().toUpperCase();
+            const isProcesado = rawProcesado === 'SI' || rawProcesado === 'TRUE' || rawProcesado === 'YES';
 
             return {
               id: `row-${index}`,
@@ -92,39 +78,40 @@ export const fetchWarrantyData = async (): Promise<WarrantyRecord[]> => {
               imeiMalo: row['IMEI MALO'] || '',
               tienda: row['TIENDA'] || '',
               fechaCambio: row['FECHA QUE SE REALIZA EL CAMBIO'] || '',
-              proveedor: row['PROVEEDOR'] || '',
+              proveedor: row['PROVEEDOR'] || '', // El transformHeader quita espacios extra automáticamente
               imeiEntregado: row['IMEI ENTREGADO AL CLIENTE'] || '',
-              falla: row['FALLA DEL EQUIPO EN CASO DE ACCESORIO'] || row['FALLA DEL EQUIPO'] || '',
+              falla: row['FALLA DEL EQUIPO EN CASO DE ACCESORIO'] || row['FALLA DEL EQUIPO'] || row['FALLA'] || '',
               cantidad: Number(row['CANTIDAD'] || 1),
-              precio: Number((row['Precio del equipo'] || '0').replace(/[^0-9.-]+/g,"")),
+              precio: Number((row['PRECIO DEL EQUIPO'] || row['PRECIO'] || '0').replace(/[^0-9.-]+/g,"")),
               fechaRealizaCambio: row['FECHA EN QUE SE REALIZA EL CAMBIO'] || '',
               equipoProcesado: isProcesado,
               observaciones: row['OBSERVACIONES'] || ''
             };
           });
-          resolve(records.reverse()); // Show newest first usually
+          
+          console.log("Registros procesados:", records.length);
+          resolve(records.reverse()); 
         },
         error: (error) => {
-          console.error("CSV Parse Error:", error);
+          console.error("Error parseando CSV:", error);
           resolve(MOCK_DATA);
         }
       });
     });
 
   } catch (error) {
-    console.warn("Could not fetch live Google Sheet. Using mock data.");
+    console.warn("No se pudo conectar a Google Sheets. Usando datos de ejemplo.", error);
     return MOCK_DATA;
   }
 };
 
 export const saveWarrantyRecord = async (record: WarrantyRecord): Promise<boolean> => {
   if (!GOOGLE_SCRIPT_URL) {
-    console.warn("Google Script URL is missing. Cannot save to cloud.");
+    console.warn("URL de Google Apps Script no configurada en services/sheetsService.ts");
     return false;
   }
 
   try {
-    // We use text/plain to avoid CORS preflight OPTIONS request which Apps Script doesn't handle well
     const response = await fetch(GOOGLE_SCRIPT_URL, {
       method: 'POST',
       body: JSON.stringify(record)
@@ -134,11 +121,35 @@ export const saveWarrantyRecord = async (record: WarrantyRecord): Promise<boolea
     if (result.result === 'success') {
       return true;
     } else {
-      console.error("Script error:", result);
+      console.error("Error del Script:", result);
       return false;
     }
   } catch (error) {
-    console.error("Save error:", error);
+    console.error("Error de conexión al guardar:", error);
+    return false;
+  }
+};
+
+export const deleteWarrantyRecord = async (id: string): Promise<boolean> => {
+  if (!GOOGLE_SCRIPT_URL) {
+    console.warn("URL de Google Apps Script no configurada en services/sheetsService.ts");
+    return false;
+  }
+
+  try {
+    const response = await fetch(`${GOOGLE_SCRIPT_URL}?action=delete&id=${id}`, {
+      method: 'GET'
+    });
+
+    const result = await response.json();
+    if (result.result === 'success') {
+      return true;
+    } else {
+      console.error("Error del Script:", result);
+      return false;
+    }
+  } catch (error) {
+    console.error("Error de conexión al eliminar:", error);
     return false;
   }
 };
