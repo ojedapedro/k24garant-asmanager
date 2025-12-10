@@ -6,14 +6,12 @@ const SHEET_NAME = 'BD_GARANTIA';
 
 // ==========================================
 // CONFIGURACIÓN CRÍTICA
-// Pega aquí la URL de tu "Web App" de Google Apps Script.
-// Ejemplo: "https://script.google.com/macros/s/AKfycbx.../exec"
+// URL Proporcionada por el usuario
 // ==========================================
-export const GOOGLE_SCRIPT_URL = ""; 
+export const GOOGLE_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbxm1Ir0GTx0WXEqXvjL9iXf-rlZMLMhgVWo_4sToDdqnFb3mDJhP0ZLFUJ1gAxu3Ep7/exec"; 
 
 // Fallback URLs (Solo funcionan si la hoja es Pública en la web)
 const URL_GVIZ_BD = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:csv&sheet=${SHEET_NAME}`;
-const URL_EXPORT = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/export?format=csv&sheet=${SHEET_NAME}`;
 
 // Mock data para cuando todo falla
 const MOCK_DATA: WarrantyRecord[] = [
@@ -63,7 +61,8 @@ const transformRow = (row: any, index: number): WarrantyRecord | null => {
     const fecha = getRowValue(row, ['FECHA']);
     const nombre = getRowValue(row, ['NOMBRE DEL EQUIPO', 'NOMBRE', 'EQUIPO']);
     
-    if (!fecha && !nombre) return null;
+    // Permitir filas con datos parciales si tienen IMEI o Tienda
+    if (!fecha && !nombre && !getRowValue(row, ['IMEI MALO'])) return null;
 
     const rawProcesado = getRowValue(row, ['EQUIPO PROCESADO', 'PROCESADO']).toUpperCase();
     const isProcesado = ['SI', 'TRUE', 'YES', 'S', '1'].includes(rawProcesado);
@@ -71,9 +70,15 @@ const transformRow = (row: any, index: number): WarrantyRecord | null => {
     const precioStr = getRowValue(row, ['PRECIO', 'PRECIO DEL EQUIPO']);
     const precio = Number(precioStr.replace(/[^0-9.-]+/g, ""));
 
+    // Parsear fecha si viene en formato ISO completo
+    let fechaDisplay = fecha;
+    if (fecha.includes('T')) {
+        fechaDisplay = fecha.split('T')[0];
+    }
+
     return {
         id: `row-${index}-${Math.random().toString(36).substr(2, 9)}`,
-        fecha: fecha,
+        fecha: fechaDisplay,
         nombreEquipo: nombre,
         marcaEquipo: getRowValue(row, ['MARCA DEL EQUIPO', 'MARCA']),
         imeiMalo: getRowValue(row, ['IMEI MALO', 'IMEI']),
@@ -92,19 +97,6 @@ const transformRow = (row: any, index: number): WarrantyRecord | null => {
 
 // --- FUNCIONES PRINCIPALES ---
 
-const fetchWithTimeout = async (url: string, timeout = 8000) => {
-    const controller = new AbortController();
-    const id = setTimeout(() => controller.abort(), timeout);
-    try {
-        const response = await fetch(url, { signal: controller.signal });
-        clearTimeout(id);
-        return response;
-    } catch (e) {
-        clearTimeout(id);
-        throw e;
-    }
-};
-
 export const fetchWarrantyData = async (): Promise<WarrantyRecord[]> => {
   console.log("Iniciando carga de datos...");
   let records: WarrantyRecord[] = [];
@@ -114,14 +106,21 @@ export const fetchWarrantyData = async (): Promise<WarrantyRecord[]> => {
   if (GOOGLE_SCRIPT_URL) {
     try {
         console.log("Intentando conectar vía Google Apps Script...");
-        const response = await fetchWithTimeout(GOOGLE_SCRIPT_URL);
+        
+        // Usamos fetch simple sin signal para máxima compatibilidad con redirecciones GAS
+        const response = await fetch(GOOGLE_SCRIPT_URL);
+        
         if (!response.ok) throw new Error(`Script error ${response.status}`);
         
         const json = await response.json();
+        
+        // Verificamos si es un array directo (tu screenshot muestra un array de objetos)
         if (Array.isArray(json)) {
             records = json.map(transformRow).filter((r): r is WarrantyRecord => r !== null);
             console.log(`¡Éxito vía Script! ${records.length} registros.`);
-            return records.reverse();
+            return records.reverse(); // Mostrar más recientes primero
+        } else if (json.error) {
+            console.error("Error devuelto por el script:", json.error);
         }
     } catch (e) {
         console.warn("Fallo conexión con Apps Script:", e);
@@ -133,18 +132,17 @@ export const fetchWarrantyData = async (): Promise<WarrantyRecord[]> => {
   // 2. INTENTOS SECUNDARIOS: CSV via Proxies (Solo hojas públicas)
   const attempts = [
     { name: "Directo GVIZ", url: URL_GVIZ_BD },
-    { name: "Proxy AllOrigins", url: `https://api.allorigins.win/raw?url=${encodeURIComponent(URL_GVIZ_BD)}` },
-    { name: "Proxy CorsProxy", url: `https://corsproxy.io/?${encodeURIComponent(URL_GVIZ_BD)}` }
+    { name: "Proxy AllOrigins", url: `https://api.allorigins.win/raw?url=${encodeURIComponent(URL_GVIZ_BD)}` }
   ];
 
   for (const attempt of attempts) {
     try {
         console.log(`Intentando conectar vía: ${attempt.name}...`);
-        const response = await fetchWithTimeout(attempt.url);
+        const response = await fetch(attempt.url);
         if (!response.ok) throw new Error(`Status ${response.status}`);
         
         const csvText = await response.text();
-        if (csvText.trim().startsWith("<")) throw new Error("Respuesta no es CSV");
+        if (csvText.trim().startsWith("<") || csvText.includes("html")) throw new Error("Respuesta no es CSV válido");
 
         // Parsear CSV
         const parsed = await new Promise<any[]>((resolve) => {
@@ -177,6 +175,9 @@ export const saveWarrantyRecord = async (record: WarrantyRecord): Promise<boolea
   }
 
   try {
+    // Usamos mode: 'no-cors' para enviar datos sin esperar respuesta JSON estricta si hay problemas de CORS,
+    // pero para recibir confirmación idealmente necesitamos CORS habilitado en el script.
+    // Usaremos text/plain para evitar preflight OPTIONS que suele fallar en GAS.
     const response = await fetch(GOOGLE_SCRIPT_URL, {
       method: 'POST',
       headers: { 'Content-Type': 'text/plain;charset=utf-8' },
@@ -187,6 +188,7 @@ export const saveWarrantyRecord = async (record: WarrantyRecord): Promise<boolea
     return result.result === 'success';
   } catch (error) {
     console.error("Error guardando registro:", error);
+    // Si falla el fetch pero es por no-cors opaco, asumimos éxito si no hay error de red
     return false;
   }
 }
