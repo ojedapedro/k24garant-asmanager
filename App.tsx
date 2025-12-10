@@ -10,7 +10,7 @@ import DataTable from './components/DataTable';
 import AIModal from './components/AIModal';
 import AddWarrantyModal from './components/AddWarrantyModal';
 
-const LOGO_URL = "https://i.ibb.co/Y4xSyf0d/Tiendas-K24.jpg";
+const LOGO_URL = "https://i.ibb.co/TM2v02nJ/descarga.png";
 
 function App() {
   const [records, setRecords] = useState<WarrantyRecord[]>([]);
@@ -24,6 +24,7 @@ function App() {
   const [generatingPDF, setGeneratingPDF] = useState(false);
   const [isAIModalOpen, setIsAIModalOpen] = useState(false);
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
+  const [logoError, setLogoError] = useState(false);
 
   useEffect(() => {
     const loadData = async () => {
@@ -189,11 +190,18 @@ function App() {
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex justify-between h-16">
             <div className="flex items-center gap-3">
-              <img 
-                src={LOGO_URL}
-                alt="K24 Logo"
-                className="h-10 w-10 rounded-lg object-cover"
-              />
+              {!logoError ? (
+                <img 
+                  src={LOGO_URL}
+                  alt="K24 Logo"
+                  className="h-10 w-10 rounded-lg object-cover"
+                  onError={() => setLogoError(true)}
+                />
+              ) : (
+                <div className="h-10 w-10 bg-blue-600 rounded-lg flex items-center justify-center text-white font-bold text-lg">
+                  K
+                </div>
+              )}
               <span className="text-xl font-bold text-gray-800 tracking-tight hidden sm:block">K24 Garantías</span>
             </div>
             <div className="flex items-center gap-4">

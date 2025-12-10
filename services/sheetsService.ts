@@ -4,8 +4,11 @@ import Papa from 'papaparse';
 const SHEET_ID = '1tUIWLYEbjJjnsjIvnVLN_FtS4FzliKlNjCiCeUXnSpY';
 const SHEET_NAME = 'BD';
 
-// URL directa a la API de visualización de Google Sheets
-const BASE_URL = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:csv&sheet=${SHEET_NAME}`;
+// Estrategia de URLs para intentar conectar
+// 1. GVIZ con nombre de hoja (Mejor opción)
+const URL_GVIZ_BD = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:csv&sheet=${SHEET_NAME}`;
+// 2. Export directo (Fallback)
+const URL_EXPORT = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/export?format=csv`;
 
 // ==========================================
 // INSTRUCCIONES PARA GUARDAR EN GOOGLE SHEETS:
@@ -45,15 +48,27 @@ const parseCSV = (csvText: string): Promise<WarrantyRecord[]> => {
             transformHeader: normalizeKey,
             complete: (results) => {
                 if (results.data.length === 0) {
+                    console.warn("CSV descargado pero vacío.");
                     resolve([]);
                     return;
                 }
 
+                console.log(`Filas crudas encontradas: ${results.data.length}`);
+                // Debug de columnas encontradas
+                if(results.data.length > 0) {
+                    console.log("Columnas detectadas:", Object.keys(results.data[0] as any));
+                }
+
                 const records: WarrantyRecord[] = results.data
-                    .filter((row: any) => row['FECHA'] || row['NOMBRE DEL EQUIPO'])
+                    .filter((row: any) => {
+                        // Filtrar filas vacías o basura
+                        const hasDate = row['FECHA'] && row['FECHA'].length > 2;
+                        const hasName = row['NOMBRE DEL EQUIPO'] && row['NOMBRE DEL EQUIPO'].length > 1;
+                        return hasDate || hasName;
+                    })
                     .map((row: any, index: number) => {
                         const rawProcesado = (row['EQUIPO PROCESADO'] || '').toString().toUpperCase();
-                        const isProcesado = ['SI', 'TRUE', 'YES', 'S'].includes(rawProcesado);
+                        const isProcesado = ['SI', 'TRUE', 'YES', 'S', '1'].includes(rawProcesado);
 
                         // Manejo flexible de nombres de columnas
                         const falla = row['FALLA DEL EQUIPO EN CASO DE ACCESORIO'] || 
@@ -81,43 +96,72 @@ const parseCSV = (csvText: string): Promise<WarrantyRecord[]> => {
                             observaciones: row['OBSERVACIONES'] || ''
                         };
                     });
+                
+                console.log(`Registros procesados válidos: ${records.length}`);
                 resolve(records.reverse());
             },
-            error: () => resolve(MOCK_DATA)
+            error: (err) => {
+                console.error("Error parseando CSV:", err);
+                resolve(MOCK_DATA);
+            }
         });
     });
 };
 
+const fetchWithTimeout = async (url: string, timeout = 5000) => {
+    const controller = new AbortController();
+    const id = setTimeout(() => controller.abort(), timeout);
+    const response = await fetch(url, { signal: controller.signal });
+    clearTimeout(id);
+    return response;
+};
+
 export const fetchWarrantyData = async (): Promise<WarrantyRecord[]> => {
-  try {
-    console.log("Intentando conectar a hoja BD...");
-    
-    let csvText = '';
-    
+  console.log("Iniciando conexión a Google Sheets...");
+  
+  // Lista de intentos en orden de prioridad
+  const attempts = [
+    { name: "Directo (GVIZ)", url: URL_GVIZ_BD },
+    { name: "Proxy 1 (AllOrigins)", url: `https://api.allorigins.win/raw?url=${encodeURIComponent(URL_GVIZ_BD)}` },
+    { name: "Proxy 2 (CorsProxy)", url: `https://corsproxy.io/?${encodeURIComponent(URL_GVIZ_BD)}` },
+    // Fallback a la hoja por defecto si 'BD' falla
+    { name: "Fallback Hoja Default", url: `https://api.allorigins.win/raw?url=${encodeURIComponent(URL_EXPORT)}` }
+  ];
+
+  for (const attempt of attempts) {
     try {
-        // Intento 1: Fetch directo (Funciona si está Publicado en la Web)
-        const response = await fetch(BASE_URL);
-        if (!response.ok) throw new Error('Direct fetch failed');
-        csvText = await response.text();
-    } catch (directError) {
-        console.warn("Conexión directa falló (posible CORS). Intentando vía Proxy...");
+        console.log(`Intentando conectar vía: ${attempt.name}...`);
+        const response = await fetchWithTimeout(attempt.url, 8000);
         
-        // Intento 2: Usar un Proxy CORS seguro para saltar la restricción del navegador
-        // 'corsproxy.io' es un servicio público gratuito comúnmente usado para esto
-        const proxyUrl = `https://corsproxy.io/?` + encodeURIComponent(BASE_URL);
-        const response = await fetch(proxyUrl);
+        if (!response.ok) {
+            throw new Error(`Status ${response.status}`);
+        }
         
-        if (!response.ok) throw new Error(`Proxy fetch failed: ${response.status}`);
-        csvText = await response.text();
+        const csvText = await response.text();
+        
+        // Verificación básica de que es un CSV y no un HTML de error (404 page, Login page, etc)
+        if (csvText.trim().startsWith("<!DOCTYPE html") || csvText.includes("<html")) {
+             throw new Error("La respuesta parece ser HTML, no CSV. (Posible error de auth o 404)");
+        }
+
+        const data = await parseCSV(csvText);
+        
+        if (data.length > 0) {
+            console.log(`¡Éxito con ${attempt.name}!`);
+            return data;
+        } else {
+            console.warn(`${attempt.name} devolvió 0 datos válidos.`);
+        }
+
+    } catch (error) {
+        console.warn(`Fallo ${attempt.name}:`, error);
+        // Continúa al siguiente intento
     }
-
-    return await parseCSV(csvText);
-
-  } catch (error) {
-    console.error("Error crítico conectando a Google Sheets:", error);
-    console.info("TIP: Para mejor rendimiento, vaya a Archivo > Compartir > Publicar en la web > CSV");
-    return MOCK_DATA;
   }
+
+  console.error("Todos los intentos de conexión fallaron.");
+  console.info("TIP: Asegúrese de que la hoja está 'Publicada en la web' (Archivo > Compartir > Publicar en la web).");
+  return MOCK_DATA;
 };
 
 export const saveWarrantyRecord = async (record: WarrantyRecord): Promise<boolean> => {
