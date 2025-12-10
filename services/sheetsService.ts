@@ -2,16 +2,16 @@ import { WarrantyRecord } from '../types';
 import Papa from 'papaparse';
 
 const SHEET_ID = '1tUIWLYEbjJjnsjIvnVLN_FtS4FzliKlNjCiCeUXnSpY';
-// Usamos gviz/tq para poder seleccionar la hoja por nombre ("BD") en lugar de GID
-const CSV_URL = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:csv&sheet=BD`;
+const SHEET_NAME = 'BD';
+
+// URL directa a la API de visualización de Google Sheets
+const BASE_URL = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:csv&sheet=${SHEET_NAME}`;
 
 // ==========================================
 // INSTRUCCIONES PARA GUARDAR EN GOOGLE SHEETS:
-// 1. Despliega el Apps Script como se indicó anteriormente.
-// 2. Copia la URL de la aplicación web (ej: https://script.google.com/macros/s/.../exec).
-// 3. Pégala DENTRO de las comillas en la variable de abajo.
+// Pega aquí la URL de tu Web App de Google Apps Script
 // ==========================================
-export const GOOGLE_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbxZgN04PtCnm2z3XgQXt3Q9rOw9Pu0uFZ4kE0oRS2nvYXbZZkF93A4bfSxZuhyfS38nTg/exec"; 
+export const GOOGLE_SCRIPT_URL = ""; 
 
 // Mock data para fallback
 const MOCK_DATA: WarrantyRecord[] = [
@@ -34,80 +34,95 @@ const MOCK_DATA: WarrantyRecord[] = [
   }
 ];
 
-// Helper para limpiar las claves del objeto (quita espacios extra y normaliza)
-const normalizeKey = (key: string) => key.trim().toUpperCase();
+// Helper para limpiar las claves del objeto
+const normalizeKey = (key: string) => key ? key.trim().toUpperCase() : '';
+
+const parseCSV = (csvText: string): Promise<WarrantyRecord[]> => {
+    return new Promise((resolve) => {
+        Papa.parse(csvText, {
+            header: true,
+            skipEmptyLines: true,
+            transformHeader: normalizeKey,
+            complete: (results) => {
+                if (results.data.length === 0) {
+                    resolve([]);
+                    return;
+                }
+
+                const records: WarrantyRecord[] = results.data
+                    .filter((row: any) => row['FECHA'] || row['NOMBRE DEL EQUIPO'])
+                    .map((row: any, index: number) => {
+                        const rawProcesado = (row['EQUIPO PROCESADO'] || '').toString().toUpperCase();
+                        const isProcesado = ['SI', 'TRUE', 'YES', 'S'].includes(rawProcesado);
+
+                        // Manejo flexible de nombres de columnas
+                        const falla = row['FALLA DEL EQUIPO EN CASO DE ACCESORIO'] || 
+                                      row['FALLA DEL EQUIPO'] || 
+                                      row['FALLA'] || '';
+                        
+                        const precioStr = row['PRECIO DEL EQUIPO'] || row['PRECIO'] || '0';
+                        const precio = Number(precioStr.toString().replace(/[^0-9.-]+/g, ""));
+
+                        return {
+                            id: `row-${index}`,
+                            fecha: row['FECHA'] || '',
+                            nombreEquipo: row['NOMBRE DEL EQUIPO'] || '',
+                            marcaEquipo: row['MARCA DEL EQUIPO'] || '',
+                            imeiMalo: row['IMEI MALO'] || '',
+                            tienda: row['TIENDA'] || '',
+                            fechaCambio: row['FECHA QUE SE REALIZA EL CAMBIO'] || '',
+                            proveedor: row['PROVEEDOR'] || '',
+                            imeiEntregado: row['IMEI ENTREGADO AL CLIENTE'] || '',
+                            falla: falla,
+                            cantidad: Number(row['CANTIDAD'] || 1),
+                            precio: isNaN(precio) ? 0 : precio,
+                            fechaRealizaCambio: row['FECHA EN QUE SE REALIZA EL CAMBIO'] || '',
+                            equipoProcesado: isProcesado,
+                            observaciones: row['OBSERVACIONES'] || ''
+                        };
+                    });
+                resolve(records.reverse());
+            },
+            error: () => resolve(MOCK_DATA)
+        });
+    });
+};
 
 export const fetchWarrantyData = async (): Promise<WarrantyRecord[]> => {
   try {
-    console.log("Intentando conectar a hoja BD:", CSV_URL);
-    const response = await fetch(CSV_URL);
+    console.log("Intentando conectar a hoja BD...");
     
-    if (!response.ok) {
-      throw new Error(`Error de red: ${response.status}`);
+    let csvText = '';
+    
+    try {
+        // Intento 1: Fetch directo (Funciona si está Publicado en la Web)
+        const response = await fetch(BASE_URL);
+        if (!response.ok) throw new Error('Direct fetch failed');
+        csvText = await response.text();
+    } catch (directError) {
+        console.warn("Conexión directa falló (posible CORS). Intentando vía Proxy...");
+        
+        // Intento 2: Usar un Proxy CORS seguro para saltar la restricción del navegador
+        // 'corsproxy.io' es un servicio público gratuito comúnmente usado para esto
+        const proxyUrl = `https://corsproxy.io/?` + encodeURIComponent(BASE_URL);
+        const response = await fetch(proxyUrl);
+        
+        if (!response.ok) throw new Error(`Proxy fetch failed: ${response.status}`);
+        csvText = await response.text();
     }
-    
-    const csvText = await response.text();
-    
-    return new Promise((resolve) => {
-      Papa.parse(csvText, {
-        header: true,
-        skipEmptyLines: true,
-        transformHeader: (header) => normalizeKey(header), // Normaliza cabeceras automáticamente
-        complete: (results) => {
-          console.log("Filas crudas encontradas:", results.data.length);
-          
-          if (results.data.length === 0) {
-            console.warn("La hoja parece vacía.");
-            resolve([]);
-            return;
-          }
 
-          const records: WarrantyRecord[] = results.data
-            .filter((row: any) => row['FECHA'] || row['NOMBRE DEL EQUIPO']) // Filtrar filas vacías
-            .map((row: any, index: number) => {
-            
-            // Lógica robusta para detectar bools
-            const rawProcesado = (row['EQUIPO PROCESADO'] || '').toString().toUpperCase();
-            const isProcesado = rawProcesado === 'SI' || rawProcesado === 'TRUE' || rawProcesado === 'YES';
-
-            return {
-              id: `row-${index}`,
-              fecha: row['FECHA'] || '',
-              nombreEquipo: row['NOMBRE DEL EQUIPO'] || '',
-              marcaEquipo: row['MARCA DEL EQUIPO'] || '',
-              imeiMalo: row['IMEI MALO'] || '',
-              tienda: row['TIENDA'] || '',
-              fechaCambio: row['FECHA QUE SE REALIZA EL CAMBIO'] || '',
-              proveedor: row['PROVEEDOR'] || '', // El transformHeader quita espacios extra automáticamente
-              imeiEntregado: row['IMEI ENTREGADO AL CLIENTE'] || '',
-              falla: row['FALLA DEL EQUIPO EN CASO DE ACCESORIO'] || row['FALLA DEL EQUIPO'] || row['FALLA'] || '',
-              cantidad: Number(row['CANTIDAD'] || 1),
-              precio: Number((row['PRECIO DEL EQUIPO'] || row['PRECIO'] || '0').replace(/[^0-9.-]+/g,"")),
-              fechaRealizaCambio: row['FECHA EN QUE SE REALIZA EL CAMBIO'] || '',
-              equipoProcesado: isProcesado,
-              observaciones: row['OBSERVACIONES'] || ''
-            };
-          });
-          
-          console.log("Registros procesados:", records.length);
-          resolve(records.reverse()); 
-        },
-        error: (error) => {
-          console.error("Error parseando CSV:", error);
-          resolve(MOCK_DATA);
-        }
-      });
-    });
+    return await parseCSV(csvText);
 
   } catch (error) {
-    console.warn("No se pudo conectar a Google Sheets. Usando datos de ejemplo.", error);
+    console.error("Error crítico conectando a Google Sheets:", error);
+    console.info("TIP: Para mejor rendimiento, vaya a Archivo > Compartir > Publicar en la web > CSV");
     return MOCK_DATA;
   }
 };
 
 export const saveWarrantyRecord = async (record: WarrantyRecord): Promise<boolean> => {
   if (!GOOGLE_SCRIPT_URL) {
-    console.warn("URL de Google Apps Script no configurada en services/sheetsService.ts");
+    console.warn("URL de Google Apps Script no configurada.");
     return false;
   }
 
@@ -118,38 +133,9 @@ export const saveWarrantyRecord = async (record: WarrantyRecord): Promise<boolea
     });
 
     const result = await response.json();
-    if (result.result === 'success') {
-      return true;
-    } else {
-      console.error("Error del Script:", result);
-      return false;
-    }
+    return result.result === 'success';
   } catch (error) {
-    console.error("Error de conexión al guardar:", error);
+    console.error("Error guardando registro:", error);
     return false;
   }
-};
-
-export const deleteWarrantyRecord = async (id: string): Promise<boolean> => {
-  if (!GOOGLE_SCRIPT_URL) {
-    console.warn("URL de Google Apps Script no configurada en services/sheetsService.ts");
-    return false;
-  }
-
-  try {
-    const response = await fetch(`${GOOGLE_SCRIPT_URL}?action=delete&id=${id}`, {
-      method: 'GET'
-    });
-
-    const result = await response.json();
-    if (result.result === 'success') {
-      return true;
-    } else {
-      console.error("Error del Script:", result);
-      return false;
-    }
-  } catch (error) {
-    console.error("Error de conexión al eliminar:", error);
-    return false;
-  }
-};
+}
