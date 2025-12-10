@@ -8,7 +8,7 @@ const SHEET_NAME = 'BD_GARANTIA';
 // CONFIGURACIÓN CRÍTICA
 // URL Proporcionada por el usuario
 // ==========================================
-export const GOOGLE_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbxm1Ir0GTx0WXEqXvjL9iXf-rlZMLMhgVWo_4sToDdqnFb3mDJhP0ZLFUJ1gAxu3Ep7/exec"; 
+export const GOOGLE_SCRIPT_URL = "https://script.google.com/macros/s/AKfycby3WzxAXY4nFsrFDVXyGqNIrEajAgs0PjmbHjU6Kgu82O0umYP_scayprN6VJ2lZCj0vQ/exec";
 
 // Fallback URLs (Solo funcionan si la hoja es Pública en la web)
 const URL_GVIZ_BD = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:csv&sheet=${SHEET_NAME}`;
