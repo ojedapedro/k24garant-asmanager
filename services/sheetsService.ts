@@ -6,7 +6,7 @@ const CSV_URL = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/export?forma
 
 // PASTE YOUR APPS SCRIPT WEB APP URL HERE
 // Example: "https://script.google.com/macros/s/AKfycbx.../exec"
-export const GOOGLE_SCRIPT_URL = ""; 
+export const https://script.google.com/macros/s/AKfycbxZgN04PtCnm2z3XgQXt3Q9rOw9Pu0uFZ4kE0oRS2nvYXbZZkF93A4bfSxZuhyfS38nTg/exec =""; 
 
 // Mock data
 const MOCK_DATA: WarrantyRecord[] = [
