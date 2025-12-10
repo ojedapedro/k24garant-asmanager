@@ -1,0 +1,5 @@
+{
+  "name": "K24 Garantías Manager",
+  "description": "Sistema de gestión de garantías de equipos celulares para tiendas K24, con integración de Google Sheets y reportes PDF asistidos por IA.",
+  "requestFramePermissions": []
+}
