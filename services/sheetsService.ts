@@ -102,34 +102,27 @@ export const fetchWarrantyData = async (): Promise<WarrantyRecord[]> => {
   let records: WarrantyRecord[] = [];
 
   // 1. INTENTO PRINCIPAL: Google Apps Script (JSON)
-  // Este es el método más robusto para hojas privadas o con problemas de CORS
   if (GOOGLE_SCRIPT_URL) {
     try {
         console.log("Intentando conectar vía Google Apps Script...");
-        
-        // Usamos fetch simple sin signal para máxima compatibilidad con redirecciones GAS
         const response = await fetch(GOOGLE_SCRIPT_URL);
-        
         if (!response.ok) throw new Error(`Script error ${response.status}`);
         
         const json = await response.json();
         
-        // Verificamos si es un array directo (tu screenshot muestra un array de objetos)
         if (Array.isArray(json)) {
             records = json.map(transformRow).filter((r): r is WarrantyRecord => r !== null);
             console.log(`¡Éxito vía Script! ${records.length} registros.`);
-            return records.reverse(); // Mostrar más recientes primero
+            return records.reverse();
         } else if (json.error) {
             console.error("Error devuelto por el script:", json.error);
         }
     } catch (e) {
         console.warn("Fallo conexión con Apps Script:", e);
     }
-  } else {
-      console.warn("GOOGLE_SCRIPT_URL no está configurada. Saltando intento principal.");
   }
 
-  // 2. INTENTOS SECUNDARIOS: CSV via Proxies (Solo hojas públicas)
+  // 2. INTENTOS SECUNDARIOS: CSV via Proxies
   const attempts = [
     { name: "Directo GVIZ", url: URL_GVIZ_BD },
     { name: "Proxy AllOrigins", url: `https://api.allorigins.win/raw?url=${encodeURIComponent(URL_GVIZ_BD)}` }
@@ -144,7 +137,6 @@ export const fetchWarrantyData = async (): Promise<WarrantyRecord[]> => {
         const csvText = await response.text();
         if (csvText.trim().startsWith("<") || csvText.includes("html")) throw new Error("Respuesta no es CSV válido");
 
-        // Parsear CSV
         const parsed = await new Promise<any[]>((resolve) => {
             Papa.parse(csvText, {
                 header: true,
@@ -156,7 +148,6 @@ export const fetchWarrantyData = async (): Promise<WarrantyRecord[]> => {
 
         if (parsed.length > 0) {
             records = parsed.map(transformRow).filter((r): r is WarrantyRecord => r !== null);
-            console.log(`¡Éxito con ${attempt.name}! ${records.length} registros.`);
             return records.reverse();
         }
     } catch (error) {
@@ -169,26 +160,43 @@ export const fetchWarrantyData = async (): Promise<WarrantyRecord[]> => {
 };
 
 export const saveWarrantyRecord = async (record: WarrantyRecord): Promise<boolean> => {
-  if (!GOOGLE_SCRIPT_URL) {
-    console.warn("No se puede guardar: GOOGLE_SCRIPT_URL no configurada.");
-    return false;
-  }
+  if (!GOOGLE_SCRIPT_URL) return false;
 
   try {
-    // Usamos mode: 'no-cors' para enviar datos sin esperar respuesta JSON estricta si hay problemas de CORS,
-    // pero para recibir confirmación idealmente necesitamos CORS habilitado en el script.
-    // Usaremos text/plain para evitar preflight OPTIONS que suele fallar en GAS.
     const response = await fetch(GOOGLE_SCRIPT_URL, {
       method: 'POST',
       headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-      body: JSON.stringify(record)
+      body: JSON.stringify({ ...record, action: 'create' })
     });
-
     const result = await response.json();
     return result.result === 'success';
   } catch (error) {
     console.error("Error guardando registro:", error);
-    // Si falla el fetch pero es por no-cors opaco, asumimos éxito si no hay error de red
     return false;
   }
+}
+
+export const updateWarrantyRecord = async (record: WarrantyRecord): Promise<boolean> => {
+    if (!GOOGLE_SCRIPT_URL) return false;
+
+    try {
+        // Enviamos 'action: update' y usamos imeiMalo como identificador
+        const payload = {
+            ...record,
+            action: 'update',
+            imeiMaloOriginal: record.imeiMalo // Llave para buscar en la hoja
+        };
+
+        const response = await fetch(GOOGLE_SCRIPT_URL, {
+            method: 'POST',
+            headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+            body: JSON.stringify(payload)
+        });
+        
+        const result = await response.json();
+        return result.result === 'success';
+    } catch (error) {
+        console.error("Error actualizando registro:", error);
+        return false;
+    }
 }

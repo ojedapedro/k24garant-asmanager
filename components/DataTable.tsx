@@ -4,9 +4,10 @@ import { WarrantyRecord } from '../types';
 interface DataTableProps {
   records: WarrantyRecord[];
   isLoading: boolean;
+  onEdit: (record: WarrantyRecord) => void;
 }
 
-const DataTable: React.FC<DataTableProps> = ({ records, isLoading }) => {
+const DataTable: React.FC<DataTableProps> = ({ records, isLoading, onEdit }) => {
   if (isLoading) {
     return (
       <div className="w-full h-64 flex items-center justify-center bg-white rounded-xl shadow-sm">
@@ -32,9 +33,11 @@ const DataTable: React.FC<DataTableProps> = ({ records, isLoading }) => {
         <table className="w-full text-left border-collapse">
           <thead>
             <tr className="bg-gray-50 border-b border-gray-200 text-xs uppercase text-gray-500 font-semibold tracking-wider">
+              <th className="px-6 py-4">Acción</th>
               <th className="px-6 py-4">Fecha</th>
               <th className="px-6 py-4">Equipo / IMEI</th>
               <th className="px-6 py-4">Tienda</th>
+              <th className="px-6 py-4">Proveedor</th>
               <th className="px-6 py-4">Falla</th>
               <th className="px-6 py-4">Precio</th>
               <th className="px-6 py-4">Estado</th>
@@ -75,6 +78,15 @@ const DataTable: React.FC<DataTableProps> = ({ records, isLoading }) => {
 
                return (
                 <tr key={record.id} className="hover:bg-blue-50/50 transition-colors text-sm text-gray-700">
+                  <td className="px-6 py-4">
+                     <button 
+                        onClick={() => onEdit(record)}
+                        className="text-gray-400 hover:text-orange-600 transition-colors p-2 rounded-full hover:bg-orange-50"
+                        title="Editar / Procesar"
+                     >
+                        <i className="fas fa-edit text-lg"></i>
+                     </button>
+                  </td>
                   <td className="px-6 py-4 whitespace-nowrap text-xs">{record.fecha}</td>
                   <td className="px-6 py-4">
                     <div className="flex flex-col">
@@ -86,6 +98,11 @@ const DataTable: React.FC<DataTableProps> = ({ records, isLoading }) => {
                   <td className="px-6 py-4">
                     <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-800">
                       {record.tienda}
+                    </span>
+                  </td>
+                  <td className="px-6 py-4">
+                    <span className="text-gray-600 text-xs uppercase font-medium">
+                      {record.proveedor || '-'}
                     </span>
                   </td>
                   <td className="px-6 py-4 max-w-xs truncate" title={record.falla}>{record.falla}</td>

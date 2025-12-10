@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
-import { fetchWarrantyData, saveWarrantyRecord, GOOGLE_SCRIPT_URL } from './services/sheetsService';
+import { fetchWarrantyData, saveWarrantyRecord, updateWarrantyRecord, GOOGLE_SCRIPT_URL } from './services/sheetsService';
 import { generateAIReport } from './services/geminiService';
 import { WarrantyRecord, FilterState, Stats } from './types';
 import StatsCards from './components/StatsCards';
@@ -9,8 +9,9 @@ import FilterBar from './components/FilterBar';
 import DataTable from './components/DataTable';
 import AIModal from './components/AIModal';
 import AddWarrantyModal from './components/AddWarrantyModal';
+import EditWarrantyModal from './components/EditWarrantyModal';
 
-const LOGO_URL = "https://i.ibb.co/TM2v02nJ/descarga.png";
+const LOGO_URL = "https://i.ibb.co/Y4xSyf0d/Tiendas-K24.jpg";
 
 function App() {
   const [records, setRecords] = useState<WarrantyRecord[]>([]);
@@ -19,11 +20,17 @@ function App() {
     startDate: '',
     endDate: '',
     imei: '',
-    tienda: ''
+    tienda: '',
+    status: ''
   });
   const [generatingPDF, setGeneratingPDF] = useState(false);
+  
+  // Modals state
   const [isAIModalOpen, setIsAIModalOpen] = useState(false);
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
+  const [isEditModalOpen, setIsEditModalOpen] = useState(false);
+  const [selectedRecord, setSelectedRecord] = useState<WarrantyRecord | null>(null);
+  
   const [logoError, setLogoError] = useState(false);
 
   useEffect(() => {
@@ -37,20 +44,38 @@ function App() {
   }, []);
 
   const handleAddRecord = async (newRecord: WarrantyRecord) => {
-    // 1. Optimistic UI Update: Show it immediately
+    // Optimistic UI Update
     setRecords(prev => [newRecord, ...prev]);
 
-    // 2. Background Save
     if (GOOGLE_SCRIPT_URL) {
       const success = await saveWarrantyRecord(newRecord);
       if (success) {
         alert("Registro guardado exitosamente en Google Sheets.");
       } else {
-        alert("El registro se guardó localmente, pero hubo un error conectando con Google Sheets. Verifique la conexión.");
+        alert("El registro se guardó localmente, pero hubo un error conectando con Google Sheets.");
       }
     } else {
-      alert("Registro local exitoso. Para guardar en la Nube, configure la URL del script en services/sheetsService.ts");
+      alert("Registro local exitoso. Configure el Script para persistencia.");
     }
+  };
+
+  const handleEditClick = (record: WarrantyRecord) => {
+      setSelectedRecord(record);
+      setIsEditModalOpen(true);
+  };
+
+  const handleUpdateRecord = async (updatedRecord: WarrantyRecord) => {
+      // Optimistic Update
+      setRecords(prev => prev.map(r => r.id === updatedRecord.id ? updatedRecord : r));
+      
+      if (GOOGLE_SCRIPT_URL) {
+          const success = await updateWarrantyRecord(updatedRecord);
+          if (success) {
+              alert("Registro actualizado correctamente en Google Sheets.");
+          } else {
+              alert("Actualización local. Error al conectar con Google Sheets (Verifique que el script soporte 'update').");
+          }
+      }
   };
 
   // Filter Logic
@@ -59,6 +84,17 @@ function App() {
       const matchDateStart = filters.startDate ? record.fecha >= filters.startDate : true;
       const matchDateEnd = filters.endDate ? record.fecha <= filters.endDate : true;
       const matchTienda = filters.tienda ? record.tienda === filters.tienda : true;
+      
+      // Logic for Status Filter (Mutually exclusive for clarity)
+      const matchStatus = filters.status ? (() => {
+          if (filters.status === 'entregado') return !!record.imeiEntregado;
+          // Processed but NOT yet delivered
+          if (filters.status === 'procesado') return record.equipoProcesado && !record.imeiEntregado;
+          // Not processed AND not delivered
+          if (filters.status === 'pendiente') return !record.equipoProcesado && !record.imeiEntregado;
+          return true;
+      })() : true;
+
       const searchLower = filters.imei.toLowerCase();
       const matchImei = filters.imei ? (
         record.imeiMalo.toLowerCase().includes(searchLower) ||
@@ -66,28 +102,23 @@ function App() {
         record.marcaEquipo.toLowerCase().includes(searchLower)
       ) : true;
 
-      return matchDateStart && matchDateEnd && matchTienda && matchImei;
+      return matchDateStart && matchDateEnd && matchTienda && matchStatus && matchImei;
     });
   }, [records, filters]);
 
-  // Derived Data: Unique Stores
+  // Derived Data
   const tiendas = useMemo(() => {
     const storeSet = new Set(records.map(r => r.tienda).filter(Boolean));
-    if (storeSet.size === 0) return ['K24 Central', 'K24 Norte', 'K24 Sur', 'K24 Este']; // Default fallback
+    if (storeSet.size === 0) return ['K24 Central', 'K24 Norte', 'K24 Sur', 'K24 Este'];
     return Array.from(storeSet).sort();
   }, [records]);
 
-  // Derived Data: Stats
   const stats: Stats = useMemo(() => {
     const totalRecords = filteredRecords.length;
     const totalValue = filteredRecords.reduce((sum, r) => sum + r.precio, 0);
-    
-    // Top Brand
     const brands: Record<string, number> = {};
     filteredRecords.forEach(r => { if(r.marcaEquipo) brands[r.marcaEquipo] = (brands[r.marcaEquipo] || 0) + 1; });
     const topBrand = Object.entries(brands).sort((a,b) => b[1] - a[1])[0]?.[0] || '';
-
-    // Top Store
     const stores: Record<string, number> = {};
     filteredRecords.forEach(r => { if(r.tienda) stores[r.tienda] = (stores[r.tienda] || 0) + 1; });
     const topStore = Object.entries(stores).sort((a,b) => b[1] - a[1])[0]?.[0] || '';
@@ -99,10 +130,8 @@ function App() {
     setGeneratingPDF(true);
     try {
       const doc = new jsPDF();
-      
       let titleX = 14;
 
-      // Try adding logo
       try {
         const response = await fetch(LOGO_URL);
         if (response.ok) {
@@ -111,10 +140,9 @@ function App() {
             titleX = 40; 
         }
       } catch (e) {
-          console.warn("Could not fetch logo for PDF", e);
+          console.warn("Could not fetch logo for PDF");
       }
       
-      // Header
       doc.setFontSize(18);
       doc.setTextColor(40);
       doc.text("Reporte de Garantías - Tiendas K24", titleX, 22);
@@ -123,30 +151,23 @@ function App() {
       doc.setTextColor(100);
       const dateStr = new Date().toLocaleDateString();
       doc.text(`Fecha de emisión: ${dateStr}`, titleX, 28);
-      
       if (filters.tienda) doc.text(`Filtro Tienda: ${filters.tienda}`, titleX, 34);
+      if (filters.status) doc.text(`Filtro Estado: ${filters.status.toUpperCase()}`, titleX, 39);
       
-      // AI Summary Generation
       let startY = 45;
       try {
           const summary = await generateAIReport(filteredRecords, 
-            `Reporte filtrado para tienda: ${filters.tienda || 'Todas'}, rango: ${filters.startDate || 'Inicio'} a ${filters.endDate || 'Hoy'}.`);
-          
+            `Reporte filtrado para tienda: ${filters.tienda || 'Todas'}. Estado: ${filters.status || 'Todos'}`);
           doc.setFontSize(11);
           doc.setTextColor(0);
           doc.text("Resumen Inteligente:", 14, startY);
           doc.setFontSize(9);
           doc.setTextColor(60);
-          
           const splitText = doc.splitTextToSize(summary, 180);
           doc.text(splitText, 14, startY + 6);
-          
           startY += (splitText.length * 5) + 10;
-      } catch (e) {
-          console.log("Skipping AI summary due to error");
-      }
+      } catch (e) { console.log("Skipping AI summary"); }
 
-      // Table
       autoTable(doc, {
         startY: startY,
         head: [['Fecha', 'Equipo', 'Tienda', 'IMEI Malo', 'Estado', 'Procesado', 'Obs', 'Precio']],
@@ -161,13 +182,10 @@ function App() {
           `$${r.precio}`
         ]),
         styles: { fontSize: 8 },
-        headStyles: { fillColor: [59, 130, 246] }, // Tailwind blue-500
-        columnStyles: {
-            6: { cellWidth: 30 } // Limit width of Observations column
-        }
+        headStyles: { fillColor: [59, 130, 246] },
+        columnStyles: { 6: { cellWidth: 30 } }
       });
 
-      // Footer Stats
       const finalY = (doc as any).lastAutoTable.finalY + 10;
       doc.setFontSize(10);
       doc.setTextColor(0);
@@ -185,7 +203,6 @@ function App() {
 
   return (
     <div className="min-h-screen bg-gray-50 pb-20 font-sans">
-      {/* Navbar */}
       <nav className="bg-white border-b border-gray-200 sticky top-0 z-30">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex justify-between h-16">
@@ -198,9 +215,7 @@ function App() {
                   onError={() => setLogoError(true)}
                 />
               ) : (
-                <div className="h-10 w-10 bg-blue-600 rounded-lg flex items-center justify-center text-white font-bold text-lg">
-                  K
-                </div>
+                <div className="h-10 w-10 bg-blue-600 rounded-lg flex items-center justify-center text-white font-bold text-lg">K</div>
               )}
               <span className="text-xl font-bold text-gray-800 tracking-tight hidden sm:block">K24 Garantías</span>
             </div>
@@ -217,76 +232,51 @@ function App() {
               >
                 <i className="fas fa-magic"></i> Consultar AI
               </button>
-              <div className="h-8 w-8 rounded-full bg-gray-200 flex items-center justify-center text-gray-500">
-                <i className="fas fa-user"></i>
-              </div>
             </div>
           </div>
         </div>
       </nav>
 
-      {/* Main Content */}
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        
-        {/* Header Section */}
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-8">
           <div>
             <h1 className="text-2xl font-bold text-gray-900">Tablero de Control</h1>
             <p className="text-sm text-gray-500">Gestiona y reporta las garantías de equipos</p>
           </div>
           <div className="flex gap-3">
-             <button 
-                onClick={() => setIsAIModalOpen(true)}
-                className="md:hidden flex items-center justify-center gap-2 text-sm font-medium text-blue-600 bg-blue-50 px-4 py-2 rounded-lg hover:bg-blue-100 transition-colors"
-              >
+             <button onClick={() => setIsAIModalOpen(true)} className="md:hidden flex items-center justify-center gap-2 text-sm font-medium text-blue-600 bg-blue-50 px-4 py-2 rounded-lg">
                 <i className="fas fa-magic"></i>
               </button>
             <button
               onClick={handleGeneratePDF}
               disabled={generatingPDF || filteredRecords.length === 0}
-              className={`flex items-center gap-2 px-5 py-2.5 rounded-lg text-white font-medium shadow-sm transition-all
-                ${generatingPDF || filteredRecords.length === 0 
-                  ? 'bg-gray-400 cursor-not-allowed' 
-                  : 'bg-gray-900 hover:bg-gray-800 hover:shadow-md'
-                }`}
+              className={`flex items-center gap-2 px-5 py-2.5 rounded-lg text-white font-medium shadow-sm transition-all ${generatingPDF || filteredRecords.length === 0 ? 'bg-gray-400 cursor-not-allowed' : 'bg-gray-900 hover:bg-gray-800'}`}
             >
-              {generatingPDF ? (
-                <>
-                  <i className="fas fa-circle-notch fa-spin"></i> Generando...
-                </>
-              ) : (
-                <>
-                  <i className="fas fa-file-pdf"></i> Exportar Reporte
-                </>
-              )}
+              {generatingPDF ? <><i className="fas fa-circle-notch fa-spin"></i> Generando...</> : <><i className="fas fa-file-pdf"></i> Exportar Reporte</>}
             </button>
           </div>
         </div>
 
-        {/* Components */}
         <StatsCards stats={stats} />
-        
-        <FilterBar 
-          filters={filters} 
-          setFilters={setFilters} 
-          tiendas={tiendas} 
-        />
-        
-        <DataTable records={filteredRecords} isLoading={loading} />
+        <FilterBar filters={filters} setFilters={setFilters} tiendas={tiendas} />
+        <DataTable records={filteredRecords} isLoading={loading} onEdit={handleEditClick} />
 
       </main>
 
-      <AIModal 
-        isOpen={isAIModalOpen} 
-        onClose={() => setIsAIModalOpen(false)} 
-        records={filteredRecords} 
-      />
-
+      <AIModal isOpen={isAIModalOpen} onClose={() => setIsAIModalOpen(false)} records={filteredRecords} />
+      
       <AddWarrantyModal
         isOpen={isAddModalOpen}
         onClose={() => setIsAddModalOpen(false)}
         onAdd={handleAddRecord}
         tiendas={tiendas}
+      />
+
+      <EditWarrantyModal 
+        isOpen={isEditModalOpen}
+        onClose={() => setIsEditModalOpen(false)}
+        onUpdate={handleUpdateRecord}
+        record={selectedRecord}
       />
     </div>
   );

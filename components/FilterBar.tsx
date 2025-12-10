@@ -18,7 +18,8 @@ const FilterBar: React.FC<FilterBarProps> = ({ filters, setFilters, tiendas }) =
       startDate: '',
       endDate: '',
       imei: '',
-      tienda: ''
+      tienda: '',
+      status: ''
     });
   };
 
@@ -60,6 +61,21 @@ const FilterBar: React.FC<FilterBarProps> = ({ filters, setFilters, tiendas }) =
             {tiendas.map((t, idx) => (
               <option key={idx} value={t}>{t}</option>
             ))}
+          </select>
+        </div>
+
+        <div className="flex-1">
+          <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1">Estado</label>
+          <select
+            name="status"
+            value={filters.status}
+            onChange={handleChange}
+            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-colors text-sm bg-white"
+          >
+            <option value="">Todos los estados</option>
+            <option value="pendiente">Pendiente</option>
+            <option value="procesado">Procesado (En Tienda)</option>
+            <option value="entregado">Entregado</option>
           </select>
         </div>
 

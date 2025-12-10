@@ -21,6 +21,7 @@ export interface FilterState {
   endDate: string;
   imei: string;
   tienda: string;
+  status: string; // Nuevo filtro de estado
 }
 
 export interface Stats {
