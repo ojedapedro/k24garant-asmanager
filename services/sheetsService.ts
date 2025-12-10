@@ -2,17 +2,20 @@ import { WarrantyRecord } from '../types';
 import Papa from 'papaparse';
 
 const SHEET_ID = '1tUIWLYEbjJjnsjIvnVLN_FtS4FzliKlNjCiCeUXnSpY';
-const SHEET_NAME = 'BD';
+const SHEET_NAME = 'BD_GARANTIA'; // Actualizado para usar la nueva hoja
 
 // Estrategia de URLs para intentar conectar
 // 1. GVIZ con nombre de hoja (Mejor opción)
 const URL_GVIZ_BD = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:csv&sheet=${SHEET_NAME}`;
 // 2. Export directo (Fallback)
-const URL_EXPORT = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/export?format=csv`;
+const URL_EXPORT = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/export?format=csv&sheet=${SHEET_NAME}`;
 
 // ==========================================
 // INSTRUCCIONES PARA GUARDAR EN GOOGLE SHEETS:
-// Pega aquí la URL de tu Web App de Google Apps Script
+// 1. Crea un script en tu Google Sheet (Extensiones > Apps Script)
+// 2. Pega el código del servidor (doPost)
+// 3. Implementar > Nueva implementación > Web App > Acceso: Cualquier usuario
+// 4. Copia la URL generada y pégala abajo entre las comillas
 // ==========================================
 export const GOOGLE_SCRIPT_URL = ""; 
 
@@ -54,11 +57,7 @@ const parseCSV = (csvText: string): Promise<WarrantyRecord[]> => {
                 }
 
                 console.log(`Filas crudas encontradas: ${results.data.length}`);
-                // Debug de columnas encontradas
-                if(results.data.length > 0) {
-                    console.log("Columnas detectadas:", Object.keys(results.data[0] as any));
-                }
-
+                
                 const records: WarrantyRecord[] = results.data
                     .filter((row: any) => {
                         // Filtrar filas vacías o basura
@@ -124,8 +123,8 @@ export const fetchWarrantyData = async (): Promise<WarrantyRecord[]> => {
     { name: "Directo (GVIZ)", url: URL_GVIZ_BD },
     { name: "Proxy 1 (AllOrigins)", url: `https://api.allorigins.win/raw?url=${encodeURIComponent(URL_GVIZ_BD)}` },
     { name: "Proxy 2 (CorsProxy)", url: `https://corsproxy.io/?${encodeURIComponent(URL_GVIZ_BD)}` },
-    // Fallback a la hoja por defecto si 'BD' falla
-    { name: "Fallback Hoja Default", url: `https://api.allorigins.win/raw?url=${encodeURIComponent(URL_EXPORT)}` }
+    // Fallback con formato de exportación tradicional
+    { name: "Fallback Export", url: `https://api.allorigins.win/raw?url=${encodeURIComponent(URL_EXPORT)}` }
   ];
 
   for (const attempt of attempts) {
@@ -139,9 +138,9 @@ export const fetchWarrantyData = async (): Promise<WarrantyRecord[]> => {
         
         const csvText = await response.text();
         
-        // Verificación básica de que es un CSV y no un HTML de error (404 page, Login page, etc)
+        // Verificación básica de que es un CSV y no un HTML de error
         if (csvText.trim().startsWith("<!DOCTYPE html") || csvText.includes("<html")) {
-             throw new Error("La respuesta parece ser HTML, no CSV. (Posible error de auth o 404)");
+             throw new Error("La respuesta parece ser HTML, no CSV.");
         }
 
         const data = await parseCSV(csvText);
@@ -160,26 +159,31 @@ export const fetchWarrantyData = async (): Promise<WarrantyRecord[]> => {
   }
 
   console.error("Todos los intentos de conexión fallaron.");
-  console.info("TIP: Asegúrese de que la hoja está 'Publicada en la web' (Archivo > Compartir > Publicar en la web).");
   return MOCK_DATA;
 };
 
 export const saveWarrantyRecord = async (record: WarrantyRecord): Promise<boolean> => {
   if (!GOOGLE_SCRIPT_URL) {
-    console.warn("URL de Google Apps Script no configurada.");
+    console.warn("URL de Google Apps Script no configurada en services/sheetsService.ts");
     return false;
   }
 
   try {
+    // IMPORTANTE: Usamos 'Content-Type': 'text/plain' para evitar que el navegador
+    // envíe una solicitud OPTIONS (Preflight) que Google Apps Script no soporta bien.
+    // El script en el backend debe usar JSON.parse(e.postData.contents).
     const response = await fetch(GOOGLE_SCRIPT_URL, {
       method: 'POST',
+      headers: {
+        'Content-Type': 'text/plain;charset=utf-8', 
+      },
       body: JSON.stringify(record)
     });
 
     const result = await response.json();
     return result.result === 'success';
   } catch (error) {
-    console.error("Error guardando registro:", error);
+    console.error("Error guardando registro en la nube:", error);
     return false;
   }
 }
