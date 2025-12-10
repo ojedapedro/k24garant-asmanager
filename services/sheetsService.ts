@@ -1,5 +1,5 @@
 import { WarrantyRecord } from '../types';
-import Papa from 'papaparse';
+import * as Papa from 'papaparse';
 
 const SHEET_ID = '1tUIWLYEbjJjnsjIvnVLN_FtS4FzliKlNjCiCeUXnSpY';
 const SHEET_NAME = 'BD_GARANTIA';

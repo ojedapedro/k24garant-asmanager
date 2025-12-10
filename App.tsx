@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { jsPDF } from 'jspdf';
+import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import { fetchWarrantyData, saveWarrantyRecord, updateWarrantyRecord, deleteWarrantyRecord, GOOGLE_SCRIPT_URL } from './services/sheetsService';
 import { generateAIReport } from './services/geminiService';
@@ -77,9 +77,6 @@ function App() {
             alert("Registro eliminado correctamente de Google Sheets.");
         } else {
             alert("El registro se eliminó de la vista, pero hubo un error al eliminarlo en Google Sheets. Verifique el script.");
-            // Opcional: Recargar datos si falla para mostrar realidad
-            // const data = await fetchWarrantyData();
-            // setRecords(data);
         }
     }
   };
@@ -230,6 +227,7 @@ function App() {
         columnStyles: { 6: { cellWidth: 30 } }
       });
 
+      // Type assertion fix for lastAutoTable property
       const finalY = (doc as any).lastAutoTable.finalY + 10;
       doc.setFontSize(10);
       doc.setTextColor(0);
