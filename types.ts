@@ -14,6 +14,7 @@ export interface WarrantyRecord {
   fechaRealizaCambio: string;
   equipoProcesado: boolean; // Nuevo campo: Regreso de proveedor a tienda
   observaciones: string;    // Nuevo campo: Notas adicionales
+  isArchived?: boolean;     // Nuevo campo: Indica si está en la hoja de históricos
 }
 
 export interface FilterState {

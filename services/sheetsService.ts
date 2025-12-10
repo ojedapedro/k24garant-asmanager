@@ -30,7 +30,8 @@ const MOCK_DATA: WarrantyRecord[] = [
     precio: 0,
     fechaRealizaCambio: '',
     equipoProcesado: false,
-    observaciones: 'Configure GOOGLE_SCRIPT_URL en services/sheetsService.ts'
+    observaciones: 'Configure GOOGLE_SCRIPT_URL en services/sheetsService.ts',
+    isArchived: false
   }
 ];
 
@@ -75,6 +76,10 @@ const transformRow = (row: any, index: number): WarrantyRecord | null => {
     if (fecha.includes('T')) {
         fechaDisplay = fecha.split('T')[0];
     }
+    
+    // Detectar si viene del histórico (Script devuelve campo FUENTE)
+    const fuente = getRowValue(row, ['FUENTE']);
+    const isArchived = fuente === 'HISTORICO';
 
     return {
         id: `row-${index}-${Math.random().toString(36).substr(2, 9)}`,
@@ -91,7 +96,8 @@ const transformRow = (row: any, index: number): WarrantyRecord | null => {
         precio: isNaN(precio) ? 0 : precio,
         fechaRealizaCambio: getRowValue(row, ['FECHA EN QUE SE REALIZA EL CAMBIO', 'FECHA REALIZA']),
         equipoProcesado: isProcesado,
-        observaciones: getRowValue(row, ['OBSERVACIONES', 'OBS', 'NOTAS'])
+        observaciones: getRowValue(row, ['OBSERVACIONES', 'OBS', 'NOTAS']),
+        isArchived: isArchived
     };
 };
 
@@ -197,6 +203,29 @@ export const updateWarrantyRecord = async (record: WarrantyRecord): Promise<bool
         return result.result === 'success';
     } catch (error) {
         console.error("Error actualizando registro:", error);
+        return false;
+    }
+}
+
+export const deleteWarrantyRecord = async (record: WarrantyRecord): Promise<boolean> => {
+    if (!GOOGLE_SCRIPT_URL) return false;
+
+    try {
+        const payload = {
+            action: 'delete',
+            imeiMalo: record.imeiMalo // Identificador para buscar y borrar
+        };
+
+        const response = await fetch(GOOGLE_SCRIPT_URL, {
+            method: 'POST',
+            headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+            body: JSON.stringify(payload)
+        });
+        
+        const result = await response.json();
+        return result.result === 'success';
+    } catch (error) {
+        console.error("Error eliminando registro:", error);
         return false;
     }
 }

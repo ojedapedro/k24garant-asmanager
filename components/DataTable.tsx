@@ -5,9 +5,10 @@ interface DataTableProps {
   records: WarrantyRecord[];
   isLoading: boolean;
   onEdit: (record: WarrantyRecord) => void;
+  onDelete: (record: WarrantyRecord) => void;
 }
 
-const DataTable: React.FC<DataTableProps> = ({ records, isLoading, onEdit }) => {
+const DataTable: React.FC<DataTableProps> = ({ records, isLoading, onEdit, onDelete }) => {
   if (isLoading) {
     return (
       <div className="w-full h-64 flex items-center justify-center bg-white rounded-xl shadow-sm">
@@ -33,7 +34,7 @@ const DataTable: React.FC<DataTableProps> = ({ records, isLoading, onEdit }) => 
         <table className="w-full text-left border-collapse">
           <thead>
             <tr className="bg-gray-50 border-b border-gray-200 text-xs uppercase text-gray-500 font-semibold tracking-wider">
-              <th className="px-6 py-4">Acción</th>
+              <th className="px-6 py-4">Acciones</th>
               <th className="px-6 py-4">Fecha</th>
               <th className="px-6 py-4">Equipo / IMEI</th>
               <th className="px-6 py-4">Tienda</th>
@@ -77,15 +78,24 @@ const DataTable: React.FC<DataTableProps> = ({ records, isLoading, onEdit }) => 
                }
 
                return (
-                <tr key={record.id} className="hover:bg-blue-50/50 transition-colors text-sm text-gray-700">
-                  <td className="px-6 py-4">
-                     <button 
-                        onClick={() => onEdit(record)}
-                        className="text-gray-400 hover:text-orange-600 transition-colors p-2 rounded-full hover:bg-orange-50"
-                        title="Editar / Procesar"
-                     >
-                        <i className="fas fa-edit text-lg"></i>
-                     </button>
+                <tr key={record.id} className={`hover:bg-blue-50/50 transition-colors text-sm text-gray-700 ${record.isArchived ? 'bg-gray-50/50' : ''}`}>
+                  <td className="px-6 py-4 whitespace-nowrap">
+                     <div className="flex gap-2">
+                         <button 
+                            onClick={() => onEdit(record)}
+                            className="text-gray-400 hover:text-orange-600 transition-colors p-2 rounded-full hover:bg-orange-50"
+                            title="Editar / Procesar"
+                         >
+                            <i className="fas fa-edit text-lg"></i>
+                         </button>
+                         <button 
+                            onClick={() => onDelete(record)}
+                            className="text-gray-400 hover:text-red-600 transition-colors p-2 rounded-full hover:bg-red-50"
+                            title="Eliminar Registro"
+                         >
+                            <i className="fas fa-trash text-lg"></i>
+                         </button>
+                     </div>
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap text-xs">{record.fecha}</td>
                   <td className="px-6 py-4">
@@ -108,8 +118,15 @@ const DataTable: React.FC<DataTableProps> = ({ records, isLoading, onEdit }) => 
                   <td className="px-6 py-4 max-w-xs truncate" title={record.falla}>{record.falla}</td>
                   <td className="px-6 py-4 font-medium text-gray-900">${record.precio.toLocaleString()}</td>
                   <td className="px-6 py-4">
-                      <div className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold border ${statusClass}`}>
-                          {statusContent}
+                      <div className="flex flex-col gap-1 items-start">
+                        <div className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold border ${statusClass}`}>
+                            {statusContent}
+                        </div>
+                        {record.isArchived && (
+                            <span className="text-[10px] text-gray-400 flex items-center gap-1 px-1">
+                                <i className="fas fa-archive"></i> Histórico
+                            </span>
+                        )}
                       </div>
                   </td>
                   <td className="px-6 py-4 max-w-[200px]">

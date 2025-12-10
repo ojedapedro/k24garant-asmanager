@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
-import { fetchWarrantyData, saveWarrantyRecord, updateWarrantyRecord, GOOGLE_SCRIPT_URL } from './services/sheetsService';
+import { fetchWarrantyData, saveWarrantyRecord, updateWarrantyRecord, deleteWarrantyRecord, GOOGLE_SCRIPT_URL } from './services/sheetsService';
 import { generateAIReport } from './services/geminiService';
 import { WarrantyRecord, FilterState, Stats } from './types';
 import StatsCards from './components/StatsCards';
@@ -62,6 +62,26 @@ function App() {
   const handleEditClick = (record: WarrantyRecord) => {
       setSelectedRecord(record);
       setIsEditModalOpen(true);
+  };
+
+  const handleDeleteRecord = async (record: WarrantyRecord) => {
+    const confirmMessage = `¿Estás seguro de que quieres ELIMINAR el registro de ${record.nombreEquipo} (${record.imeiMalo})?\n\nEsta acción no se puede deshacer.`;
+    if (!window.confirm(confirmMessage)) return;
+
+    // Optimistic UI Update (Remove immediately from view)
+    setRecords(prev => prev.filter(r => r.id !== record.id));
+
+    if (GOOGLE_SCRIPT_URL) {
+        const success = await deleteWarrantyRecord(record);
+        if (success) {
+            alert("Registro eliminado correctamente de Google Sheets.");
+        } else {
+            alert("El registro se eliminó de la vista, pero hubo un error al eliminarlo en Google Sheets. Verifique el script.");
+            // Opcional: Recargar datos si falla para mostrar realidad
+            // const data = await fetchWarrantyData();
+            // setRecords(data);
+        }
+    }
   };
 
   const handleUpdateRecord = async (updatedRecord: WarrantyRecord) => {
@@ -143,31 +163,55 @@ function App() {
           console.warn("Could not fetch logo for PDF");
       }
       
+      const isFiltered = filteredRecords.length !== records.length || Object.values(filters).some(Boolean);
+      const reportTitle = isFiltered ? "Reporte de Garantías (Filtrado)" : "Reporte General de Garantías - Tiendas K24";
+
       doc.setFontSize(18);
       doc.setTextColor(40);
-      doc.text("Reporte de Garantías - Tiendas K24", titleX, 22);
+      doc.text(reportTitle, titleX, 22);
       
       doc.setFontSize(10);
       doc.setTextColor(100);
       const dateStr = new Date().toLocaleDateString();
-      doc.text(`Fecha de emisión: ${dateStr}`, titleX, 28);
-      if (filters.tienda) doc.text(`Filtro Tienda: ${filters.tienda}`, titleX, 34);
-      if (filters.status) doc.text(`Filtro Estado: ${filters.status.toUpperCase()}`, titleX, 39);
       
-      let startY = 45;
+      // Dynamic Header Positioning
+      let yPos = 28;
+      doc.text(`Fecha de emisión: ${dateStr}`, titleX, yPos);
+      yPos += 5;
+      
+      if (filters.tienda) {
+        doc.text(`Filtro Tienda: ${filters.tienda}`, titleX, yPos);
+        yPos += 5;
+      }
+      if (filters.status) {
+        doc.text(`Filtro Estado: ${filters.status.toUpperCase()}`, titleX, yPos);
+        yPos += 5;
+      }
+      if (filters.startDate || filters.endDate) {
+         doc.text(`Período: ${filters.startDate || 'Inicio'} a ${filters.endDate || 'Presente'}`, titleX, yPos);
+         yPos += 5;
+      }
+      
+      let startY = yPos + 8;
+      
+      // AI Summary
       try {
           const summary = await generateAIReport(filteredRecords, 
-            `Reporte filtrado para tienda: ${filters.tienda || 'Todas'}. Estado: ${filters.status || 'Todos'}`);
+            `Reporte filtrado para tienda: ${filters.tienda || 'Todas'}. Estado: ${filters.status || 'Todos'}. Fecha: ${dateStr}`);
+          
           doc.setFontSize(11);
           doc.setTextColor(0);
-          doc.text("Resumen Inteligente:", 14, startY);
+          doc.text("Resumen Inteligente (AI):", 14, startY);
+          
           doc.setFontSize(9);
           doc.setTextColor(60);
           const splitText = doc.splitTextToSize(summary, 180);
           doc.text(splitText, 14, startY + 6);
-          startY += (splitText.length * 5) + 10;
+          
+          startY += (splitText.length * 5) + 12;
       } catch (e) { console.log("Skipping AI summary"); }
 
+      // Data Table
       autoTable(doc, {
         startY: startY,
         head: [['Fecha', 'Equipo', 'Tienda', 'IMEI Malo', 'Estado', 'Procesado', 'Obs', 'Precio']],
@@ -189,10 +233,11 @@ function App() {
       const finalY = (doc as any).lastAutoTable.finalY + 10;
       doc.setFontSize(10);
       doc.setTextColor(0);
-      doc.text(`Total Registros: ${stats.totalRecords}`, 14, finalY);
-      doc.text(`Valor Total Inventario: $${stats.totalValue.toLocaleString()}`, 14, finalY + 6);
+      doc.text(`Registros en este reporte: ${filteredRecords.length}`, 14, finalY);
+      doc.text(`Valor Inventario (Filtrado): $${stats.totalValue.toLocaleString()}`, 14, finalY + 6);
 
-      doc.save(`reporte_garantias_k24_${Date.now()}.pdf`);
+      const fileName = isFiltered ? `reporte_garantias_filtrado_${Date.now()}.pdf` : `reporte_garantias_general_${Date.now()}.pdf`;
+      doc.save(fileName);
     } catch (error) {
       console.error("PDF Gen Error", error);
       alert("Error generando el PDF");
@@ -252,14 +297,18 @@ function App() {
               disabled={generatingPDF || filteredRecords.length === 0}
               className={`flex items-center gap-2 px-5 py-2.5 rounded-lg text-white font-medium shadow-sm transition-all ${generatingPDF || filteredRecords.length === 0 ? 'bg-gray-400 cursor-not-allowed' : 'bg-gray-900 hover:bg-gray-800'}`}
             >
-              {generatingPDF ? <><i className="fas fa-circle-notch fa-spin"></i> Generando...</> : <><i className="fas fa-file-pdf"></i> Exportar Reporte</>}
+              {generatingPDF ? (
+                <><i className="fas fa-circle-notch fa-spin"></i> Generando...</>
+              ) : (
+                <><i className="fas fa-file-pdf"></i> Exportar Vista PDF ({filteredRecords.length})</>
+              )}
             </button>
           </div>
         </div>
 
         <StatsCards stats={stats} />
         <FilterBar filters={filters} setFilters={setFilters} tiendas={tiendas} />
-        <DataTable records={filteredRecords} isLoading={loading} onEdit={handleEditClick} />
+        <DataTable records={filteredRecords} isLoading={loading} onEdit={handleEditClick} onDelete={handleDeleteRecord} />
 
       </main>
 
