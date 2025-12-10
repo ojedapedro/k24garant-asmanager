@@ -17,7 +17,7 @@ const URL_EXPORT = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/export?fo
 // 3. Implementar > Nueva implementación > Web App > Acceso: Cualquier usuario
 // 4. Copia la URL generada y pégala abajo entre las comillas
 // ==========================================
-export const GOOGLE_SCRIPT_URL = ""; 
+export const GOOGLE_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbxm1Ir0GTx0WXEqXvjL9iXf-rlZMLMhgVWo_4sToDdqnFb3mDJhP0ZLFUJ1gAxu3Ep7/exec"; 
 
 // Mock data para fallback
 const MOCK_DATA: WarrantyRecord[] = [
